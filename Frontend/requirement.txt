@@ -1,0 +1,5 @@
+for using the scss we install the package the npm  i sass and in this we use scss property
+
+for routing we use install package npm i react-router
+
+npm i axios
