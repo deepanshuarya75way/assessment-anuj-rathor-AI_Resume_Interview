@@ -1,236 +1,294 @@
-const fallbackResume = {
-  name: "Krish Gupta",
-  role: "Full Stack Developer",
-  phone: "+91 7465982627",
-  email: "krish23153106@akgec.ac.in",
-  github: "https://github.com/krishgupta-dev",
-  linkedin: "https://linkedin.com/in/krish-gupta-dev",
-  leetcode: "https://leetcode.com/u/krishgupta",
-  portfolio: "https://krish-resumeforge.vercel.app",
-  location: "Ghaziabad, Uttar Pradesh",
-  summary:
-    "Full Stack Developer with experience building scalable web applications using React.js, Node.js, Express.js, and MongoDB.",
-  experience: [],
-  projects: [],
-  skills: [],
-  education: [],
-  certifications: [],
-  sectionOrder: [
-    "summary",
-    "experience",
-    "projects",
-    "skills",
-    "education",
-    "certifications",
-  ],
-  template: "tech",
-};
+import { useRef, useEffect, useState } from "react";
 
 const toArray = (value) => {
-  if (Array.isArray(value)) {
-    return value.filter(Boolean);
-  }
-
+  if (Array.isArray(value)) return value.filter(Boolean);
   if (typeof value === "string") {
-    return value
-      .split(/[,\n|]/)
-      .map((item) => item.trim())
-      .filter(Boolean);
+    return value.split(/[,\n|]/).map((item) => item.trim()).filter(Boolean);
   }
-
   return [];
 };
 
-const trimLink = (value) =>
-  `${value || ""}`
-    .replace(/^https?:\/\//, "")
-    .replace(/^www\./, "")
+const cleanUrl = (url) => {
+  return `${url || ""}`
+    .replace(/^https?:\/\//i, "")
+    .replace(/^www\./i, "")
     .replace(/\/$/, "");
+};
 
-function PreviewSection({ title, children }) {
-  return (
-    <section className="resume-preview-sheet__section">
-      <h3>{title}</h3>
-      {children}
-    </section>
-  );
-}
+const formatExternalUrl = (url) => {
+  if (!url) return "#";
+  const str = `${url}`.trim();
+  if (!str) return "#";
+  if (str.startsWith("http://") || str.startsWith("https://") || str.startsWith("mailto:") || str.startsWith("tel:")) {
+    return str;
+  }
+  return `https://${str}`;
+};
 
-function ContactItem({ label, value, href }) {
-  if (!value) return null;
+export default function ResumePreviewLive({ resume, zoom = 1 }) {
+  const paperRef = useRef(null);
+  const [pageCount, setPageCount] = useState(1);
 
-  return (
-    <a className="resume-preview-sheet__contact-item" href={href || value}>
-      <span>{label}</span>
-      <strong>{trimLink(value)}</strong>
-    </a>
-  );
-}
-
-export default function ResumePreviewLive({ resume }) {
-  const source = resume || fallbackResume;
-
-  const safeResume = {
-    ...fallbackResume,
-    ...source,
-    experience: source.experience?.length ? source.experience : fallbackResume.experience,
-    projects: source.projects?.length ? source.projects : fallbackResume.projects,
-    education: source.education?.length ? source.education : fallbackResume.education,
-    skills: toArray(source.skills).length ? toArray(source.skills) : fallbackResume.skills,
-    certifications: toArray(source.certifications).length
-      ? toArray(source.certifications)
-      : fallbackResume.certifications,
-    sectionOrder: source.sectionOrder?.length
-      ? source.sectionOrder
-      : fallbackResume.sectionOrder,
+  const safe = {
+    name: resume?.name || "Your Full Name",
+    role: resume?.role || "Professional Title",
+    email: resume?.email || "",
+    phone: resume?.phone || "",
+    location: resume?.location || "",
+    github: resume?.github || "",
+    linkedin: resume?.linkedin || "",
+    leetcode: resume?.leetcode || "",
+    portfolio: resume?.portfolio || "",
+    summary: resume?.summary || "",
+    experience: resume?.experience || [],
+    projects: resume?.projects || [],
+    skills: toArray(resume?.skills),
+    education: resume?.education || [],
+    certifications: toArray(resume?.certifications),
+    sectionOrder: resume?.sectionOrder || [
+      "summary",
+      "experience",
+      "projects",
+      "skills",
+      "education",
+      "certifications"
+    ],
+    template: resume?.template || "modern"
   };
 
-  const contactItems = [
-    { key: "github", label: "GH", value: safeResume.github },
-    { key: "linkedin", label: "IN", value: safeResume.linkedin },
-    { key: "email", label: "@", value: safeResume.email, href: `mailto:${safeResume.email}` },
-    { key: "phone", label: "PH", value: safeResume.phone, href: `tel:${safeResume.phone}` },
-    { key: "leetcode", label: "LC", value: safeResume.leetcode },
-    { key: "portfolio", label: "WB", value: safeResume.portfolio },
-  ];
+  // Check height to calculate pages
+  useEffect(() => {
+    if (paperRef.current) {
+      const scrollH = paperRef.current.scrollHeight;
+      const clientH = paperRef.current.clientHeight || 1122; // ~297mm in pixels at 96dpi
+      const pages = Math.max(1, Math.ceil(scrollH / clientH));
+      setPageCount(pages);
+    }
+  }, [resume]);
 
-  const sectionMap = {
-    summary: (
-      <PreviewSection title="Summary" key="summary">
-        <p className="resume-preview-sheet__summary">{safeResume.summary}</p>
-      </PreviewSection>
-    ),
-    experience: (
-      <PreviewSection title="Work Experience" key="experience">
-        <div className="resume-preview-sheet__stack">
-          {safeResume.experience.map((item, index) => (
-            <article
-              className="resume-preview-sheet__entry"
-              key={`${item.company}-${item.title}-${index}`}
-            >
-              <div className="resume-preview-sheet__entry-head">
-                <div>
-                  <strong>{item.title}</strong>
-                  <span>
-                    {item.company}
-                    {item.location ? ` | ${item.location}` : ""}
-                  </span>
-                </div>
-                <time>
-                  {item.startDate}
-                  {item.endDate ? ` - ${item.endDate}` : ""}
-                </time>
-              </div>
+  const contacts = [
+    safe.email && { key: "email", text: safe.email, href: `mailto:${safe.email}` },
+    safe.phone && { key: "phone", text: safe.phone, href: `tel:${safe.phone}` },
+    safe.location && { key: "location", text: safe.location },
+    safe.github && { key: "github", text: cleanUrl(safe.github), href: formatExternalUrl(safe.github) },
+    safe.linkedin && { key: "linkedin", text: cleanUrl(safe.linkedin), href: formatExternalUrl(safe.linkedin) },
+    safe.leetcode && { key: "leetcode", text: cleanUrl(safe.leetcode), href: formatExternalUrl(safe.leetcode) },
+    safe.portfolio && { key: "portfolio", text: cleanUrl(safe.portfolio), href: formatExternalUrl(safe.portfolio) },
+  ].filter(Boolean);
 
-              <ul>
-                {(item.points || []).map((point, pointIndex) => (
-                  <li key={`${point}-${pointIndex}`}>{point}</li>
-                ))}
-              </ul>
-            </article>
-          ))}
-        </div>
-      </PreviewSection>
-    ),
-    projects: (
-      <PreviewSection title="Projects" key="projects">
-        <div className="resume-preview-sheet__stack">
-          {safeResume.projects.map((item, index) => (
-            <article
-              className="resume-preview-sheet__entry"
-              key={`${item.name}-${item.role}-${index}`}
-            >
-              <div className="resume-preview-sheet__entry-head">
-                <div>
-                  <strong>{item.name}</strong>
-                  <span>{item.role}</span>
-                </div>
-                <div className="resume-preview-sheet__project-links">
-                  {item.liveUrl && <a href={item.liveUrl}>Live Demo</a>}
-                  {item.githubUrl && <a href={item.githubUrl}>GitHub</a>}
-                </div>
-              </div>
+  const renderSection = (key) => {
+    switch (key) {
+      case "summary":
+        if (!safe.summary?.trim()) return null;
+        return (
+          <section className="a4-section a4-section--summary" key="summary">
+            <h3 className="a4-section__title">Professional Summary</h3>
+            <p className="a4-summary-text">{safe.summary}</p>
+          </section>
+        );
 
-              {item.stack && <p className="resume-preview-sheet__stack-line">{item.stack}</p>}
+      case "experience":
+        if (!safe.experience?.length) return null;
+        return (
+          <section className="a4-section a4-section--experience" key="experience">
+            <h3 className="a4-section__title">Work Experience</h3>
+            <div className="a4-entry-list">
+              {safe.experience.map((item, idx) => (
+                <article className="a4-entry" key={idx}>
+                  <div className="a4-entry__header">
+                    <div>
+                      <h4 className="a4-entry__role">{item.title || "Job Title"}</h4>
+                      <span className="a4-entry__org">
+                        {item.company}
+                        {item.location ? ` • ${item.location}` : ""}
+                      </span>
+                    </div>
+                    {(item.startDate || item.endDate) && (
+                      <span className="a4-entry__dates">
+                        {item.startDate} {item.endDate ? `— ${item.endDate}` : ""}
+                      </span>
+                    )}
+                  </div>
+                  {item.points?.length > 0 && (
+                    <ul className="a4-bullet-list">
+                      {item.points.map((pt, pIdx) => (
+                        <li key={pIdx}>{pt}</li>
+                      ))}
+                    </ul>
+                  )}
+                </article>
+              ))}
+            </div>
+          </section>
+        );
 
-              <ul>
-                {(item.points || []).map((point, pointIndex) => (
-                  <li key={`${point}-${pointIndex}`}>{point}</li>
-                ))}
-              </ul>
-            </article>
-          ))}
-        </div>
-      </PreviewSection>
-    ),
-    skills: (
-      <PreviewSection title="Skills" key="skills">
-        <ul className="resume-preview-sheet__skills">
-          {safeResume.skills.map((skill, index) => (
-            <li key={`${skill}-${index}`}>{skill}</li>
-          ))}
-        </ul>
-      </PreviewSection>
-    ),
-    education: (
-      <PreviewSection title="Education" key="education">
-        <div className="resume-preview-sheet__stack">
-          {safeResume.education.map((item, index) => (
-            <article
-              className="resume-preview-sheet__entry resume-preview-sheet__entry--education"
-              key={`${item.school}-${index}`}
-            >
-              <div className="resume-preview-sheet__entry-head">
-                <div>
-                  <strong>{item.school}</strong>
-                  <span>{item.degree}</span>
-                </div>
-                <time>
-                  {item.startDate}
-                  {item.endDate ? ` - ${item.endDate}` : ""}
-                </time>
-              </div>
+      case "projects":
+        if (!safe.projects?.length) return null;
+        return (
+          <section className="a4-section a4-section--projects" key="projects">
+            <h3 className="a4-section__title">Technical Projects</h3>
+            <div className="a4-entry-list">
+              {safe.projects.map((item, idx) => (
+                <article className="a4-entry" key={idx}>
+                  <div className="a4-entry__header">
+                    <div>
+                      <h4 className="a4-entry__role">
+                        {item.name}
+                        {item.role ? ` — ${item.role}` : ""}
+                      </h4>
+                      {item.stack && (
+                        <span className="a4-entry__tech-stack">Tech: {item.stack}</span>
+                      )}
+                    </div>
+                    <div className="a4-entry__links">
+                      {item.liveUrl && (
+                        <a href={formatExternalUrl(item.liveUrl)} target="_blank" rel="noopener noreferrer">
+                          Live Demo ↗
+                        </a>
+                      )}
+                      {item.githubUrl && (
+                        <a href={formatExternalUrl(item.githubUrl)} target="_blank" rel="noopener noreferrer">
+                          GitHub ↗
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                  {item.points?.length > 0 && (
+                    <ul className="a4-bullet-list">
+                      {item.points.map((pt, pIdx) => (
+                        <li key={pIdx}>{pt}</li>
+                      ))}
+                    </ul>
+                  )}
+                </article>
+              ))}
+            </div>
+          </section>
+        );
 
-              <p className="resume-preview-sheet__education-meta">
-                {item.location}
-                {item.score ? ` | ${item.score}` : ""}
-              </p>
-            </article>
-          ))}
-        </div>
-      </PreviewSection>
-    ),
-    certifications: (
-      <PreviewSection title="Certifications & Achievements" key="certifications">
-        <ul className="resume-preview-sheet__awards">
-          {safeResume.certifications.map((item, index) => (
-            <li key={`${item}-${index}`}>{item}</li>
-          ))}
-        </ul>
-      </PreviewSection>
-    ),
+      case "skills":
+        if (!safe.skills?.length) return null;
+        return (
+          <section className="a4-section a4-section--skills" key="skills">
+            <h3 className="a4-section__title">Skills & Technologies</h3>
+            <div className="a4-skills-tags">
+              {safe.skills.map((skill, idx) => (
+                <span className="a4-skill-pill" key={idx}>
+                  {skill}
+                </span>
+              ))}
+            </div>
+          </section>
+        );
+
+      case "education":
+        if (!safe.education?.length) return null;
+        return (
+          <section className="a4-section a4-section--education" key="education">
+            <h3 className="a4-section__title">Education</h3>
+            <div className="a4-entry-list">
+              {safe.education.map((item, idx) => (
+                <article className="a4-entry" key={idx}>
+                  <div className="a4-entry__header">
+                    <div>
+                      <h4 className="a4-entry__role">{item.degree || "Degree"}</h4>
+                      <span className="a4-entry__org">
+                        {item.school}
+                        {item.location ? ` • ${item.location}` : ""}
+                      </span>
+                    </div>
+                    <div className="a4-entry__meta-right">
+                      {(item.startDate || item.endDate) && (
+                        <span className="a4-entry__dates">
+                          {item.startDate} {item.endDate ? `— ${item.endDate}` : ""}
+                        </span>
+                      )}
+                      {item.score && (
+                        <span className="a4-entry__score">{item.score}</span>
+                      )}
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        );
+
+      case "certifications":
+        if (!safe.certifications?.length) return null;
+        return (
+          <section className="a4-section a4-section--certifications" key="certifications">
+            <h3 className="a4-section__title">Certifications & Achievements</h3>
+            <ul className="a4-bullet-list">
+              {safe.certifications.map((item, idx) => (
+                <li key={idx}>{item}</li>
+              ))}
+            </ul>
+          </section>
+        );
+
+      default:
+        return null;
+    }
   };
 
   return (
-    <article
-      className={`resume-paper resume-preview-sheet resume-preview-sheet--${safeResume.template}`}
+    <div 
+      className="a4-preview-sizer"
+      style={{
+        width: `${Math.round(794 * zoom)}px`,
+        minHeight: `${Math.round(1122 * pageCount * zoom)}px`,
+        position: "relative",
+        margin: "0 auto"
+      }}
     >
-      <header className="resume-preview-sheet__header">
-        <div>
-          <h1>{safeResume.name}</h1>
-          <p>{safeResume.role}</p>
-        </div>
+      <div 
+        className="a4-preview-wrapper" 
+        style={{ 
+          transform: `scale(${zoom})`,
+          transformOrigin: "top left",
+          position: "absolute",
+          top: 0,
+          left: 0
+        }}
+      >
+        <article
+          ref={paperRef}
+          className={`a4-document a4-template--${safe.template}`}
+          id="resume-a4-document"
+        >
+          {/* Top Header */}
+          <header className="a4-header">
+            <div className="a4-header__identity">
+              <h1 className="a4-header__name">{safe.name}</h1>
+              {safe.role && <p className="a4-header__title">{safe.role}</p>}
+            </div>
 
-        <div className="resume-preview-sheet__contact-grid">
-          {contactItems.map(({ key, ...item }) => (
-            <ContactItem key={key} {...item} />
-          ))}
-        </div>
-      </header>
+            {/* Sleek inline contact list */}
+            {contacts.length > 0 && (
+              <div className="a4-header__contacts">
+                {contacts.map((c, i) => (
+                  <span className="a4-contact-item" key={c.key}>
+                    {i > 0 && <span className="a4-contact-bullet">•</span>}
+                    {c.href ? (
+                      <a href={c.href} target="_blank" rel="noreferrer">
+                        {c.text}
+                      </a>
+                    ) : (
+                      <span>{c.text}</span>
+                    )}
+                  </span>
+                ))}
+              </div>
+            )}
+          </header>
 
-      {(safeResume.sectionOrder || fallbackResume.sectionOrder).map(
-        (sectionKey) => sectionMap[sectionKey]
-      )}
-    </article>
+          {/* Dynamic Reordered Sections */}
+          <div className="a4-body">
+            {safe.sectionOrder.map((sectionKey) => renderSection(sectionKey))}
+          </div>
+        </article>
+      </div>
+    </div>
   );
 }

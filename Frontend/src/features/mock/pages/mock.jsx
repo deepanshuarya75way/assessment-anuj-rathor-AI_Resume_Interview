@@ -1,10 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
+import Navbar from "../../interview/components/Navbar";
+import { ShieldCheck, Clock, CheckCircle2, ArrowLeft, Square, Sparkles } from "lucide-react";
 import { useMock } from "../hooks/useMock";
 import { endInterview } from "../service/mock.api";
 import "../style/mock.scss";
-
-
+import { useContext } from "react";
+import { SessionContext } from "../../interview/session.context";
+import { useMonitoring } from "../hooks/useMonitoring";
+import { sendMonitorEvent } from "../service/monitor.api";
+import CameraView from "../components/CameraView";
 const SESSION_ITEMS = [
   { id: "real", label: "AI Interview" },
   { id: "practice", label: "Practice Interview" }
@@ -96,10 +101,11 @@ const Mock = () => {
     evaluateAnswer,
     submitLiveAnswer,
     pushFeedback,
-    resetFeedback,
-    interviewId
+    resetFeedback
   } = useMock();
-
+  const { interviewId } = useParams();
+  const endedRef = useRef(false);
+  const isMicActiveRef = useRef(false);
   const [sessionMode, setSessionMode] = useState("real");
   const [selectedDifficulty, setSelectedDifficulty] = useState("medium");
   const [questionTypes, setQuestionTypes] = useState({
@@ -124,31 +130,70 @@ const Mock = () => {
   const [availableVoices, setAvailableVoices] = useState([]);
   const [selectedVoice, setSelectedVoice] = useState("");
   const [cameraReady, setCameraReady] = useState(false);
-  const [sessionId, setSessionId] = useState(null);
   const [conversation, setConversation] = useState([]);
   const recognitionRef = useRef(null);
   const advanceTimeoutRef = useRef(null);
   const cameraStreamRef = useRef(null);
   const videoRef = useRef(null);
-
+  const fullscreenWarningRef = useRef(false);
+  const {
+    sessionId,
+    setSessionId,
+    trustScore,
+    setTrustScore,
+    status,
+    setStatus
+  } = useContext(SessionContext);
+  const violationCooldownRef = useRef(false);
+  useMonitoring(videoRef, sessionStarted ? sessionId : null);
   const answeredQuestions = useMemo(
     () => new Set(feedbackHistory.map((item) => item.index)),
     [ feedbackHistory ]
   );
 
   const handleEndInterview = async () => {
-  try {
-    if (!sessionId) return;
+    try {
+      // 🔴 STOP EVERYTHING CLEANLY
+      recognitionRef.current?.stop();
+      stopCamera();
+      window.speechSynthesis.cancel();
+      setSessionStarted(false);
 
-    const result = await endInterview({ sessionId });
+      if (!sessionId) {
+        alert("Interview ended.");
+        navigate(`/interview/${interviewId}`); // 🔥 ADD THIS
+        return;
+      }
 
-    console.log("FINAL RESULT:", result);
-    alert(`Final Score: ${result.avgScore}`);
+      const result = await endInterview({ sessionId });
+      const params = new URLSearchParams();
 
-  } catch (err) {
-    console.error("End Interview Error:", err);
-  }
-};
+      if (interviewId) {
+        params.set("reportId", interviewId);
+      }
+
+      params.set("sessionId", sessionId);
+
+      const reportRoute = `/dashboard/report${params.toString() ? `?${params.toString()}` : ""}`;
+
+      // 🔥 RESET SESSION (VERY IMPORTANT)
+      setSessionId(null);
+      setTrustScore(100);
+      setStatus("idle");
+
+      // 🔥 NAVIGATE TO CANDIDATE REPORT PAGE
+      navigate(reportRoute, {
+        state: {
+          reportSummary: result,
+          reportId: interviewId,
+          sessionId
+        }
+      });
+
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   const currentQuestion = questionQueue[currentIndex];
   const currentPrompt = currentQuestion?.question || "Preparing your next mock interview question...";
@@ -170,6 +215,36 @@ const Mock = () => {
 
     return Math.round(total / feedbackHistory.length);
   }, [ feedbackHistory ]);
+
+  const enterFullScreen = async () => {
+  try {
+    const el = document.documentElement;
+    if (el.requestFullscreen) await el.requestFullscreen();
+  } catch (err) {
+    alert("Fullscreen required to continue interview.");
+  }
+};
+
+const exitFullScreen = () => {
+  if (document.exitFullscreen) document.exitFullscreen();
+};
+
+useEffect(() => {
+  if (!sessionStarted) return;
+
+  const timer = setInterval(() => {
+    setTimeLeft(prev => {
+      if (prev <= 1 && !endedRef.current) {
+        endedRef.current = true;
+        handleEndInterview();
+        return 0;
+      }
+      return prev - 1;
+    });
+  }, 1000);
+
+  return () => clearInterval(timer);
+}, [sessionStarted]);
 
   const transcriptPlaceholder = isListening
     ? "Listening for your answer..."
@@ -318,103 +393,151 @@ const Mock = () => {
     setCurrentIndex((prev) => prev + 1);
   };
 
-  const handleSubmitAnswer = async () => {
-    if (!currentQuestion || !answerText.trim()) return;
+const handleSubmitAnswer = async () => {
+  // 🔒 HARD BLOCK (FIRST LINE)
+  if (status === "terminated") {
+    alert("Session already terminated");
+    return;
+  }
 
-    setIsSubmitting(true);
+  // 🔒 PREVENT MULTIPLE CALLS
+  if (isSubmitting) return;
 
-    try {
-      const payload = {
+  if (!currentQuestion || !answerText.trim()) return;
+
+  setIsSubmitting(true);
+
+  try {
+    const payload = {
+      question: currentQuestion.question,
+      answer: answerText.trim()
+    };
+
+    const response =
+      sessionMode === "practice"
+        ? await evaluateAnswer(payload)
+        : await submitLiveAnswer({
+            ...payload,
+            history: conversation,
+            sessionId,
+            mode: sessionMode
+          });
+
+    // 🔥 DOUBLE CHECK AFTER API
+    if (status === "terminated") return;
+
+    // 🔥 SESSION ID
+    if (response?.sessionId && !sessionId) {
+      setSessionId(response.sessionId);
+    }
+
+    // 🔥 TRUST SCORE
+    if (response?.trustScore !== undefined) {
+      setTrustScore(response.trustScore);
+    }
+
+    // 🚨 TERMINATION HANDLING
+    if (response?.status === "terminated") {
+      setStatus("terminated");
+
+      alert("❌ Interview terminated due to violations");
+
+      navigate(`/interview/${interviewId}`);
+      return; // 🔥 HARD STOP
+    }
+
+    // 🔥 SAFE CONTINUE ONLY IF ACTIVE
+    setConversation(prev => [
+      ...prev,
+      {
         question: currentQuestion.question,
         answer: answerText.trim()
-      };
+      }
+    ]);
 
-     const response =
-  sessionMode === "practice"
-    ? await evaluateAnswer(payload)
-    : await submitLiveAnswer({
-        ...payload,
-        history: conversation,
-        sessionId, // 🔥 ADD
-        mode: sessionMode
-      });
+    // 🔥 FOLLOW UPS (SAFE)
+    if (response?.followUps?.length && questionQueue.length < 20) {
+      const follow = response.followUps[0];
 
-      // 🔥 SAVE SESSION
-        if (response?.sessionId) {
-          setSessionId(response.sessionId);
-        }
-
-        // 🔥 SAVE CONVERSATION
-        setConversation(prev => [
+      if (follow?.question) {
+        setQuestionQueue(prev => [
           ...prev,
           {
-            question: currentQuestion.question,
-            answer: answerText.trim()
+            id: `follow-${Date.now()}`,
+            question: follow.question,
+            intention: follow.intention,
+            answer: follow.answer,
+            type: "followup",
+            source: "ai"
           }
         ]);
-
-        if (response?.followUps?.length && questionQueue.length < 20) {
-          const follow = response.followUps[0];
-
-          setQuestionQueue(prev => [
-            ...prev,
-            {
-              id: `follow-${Date.now()}`,
-              question: follow.question,
-              intention: follow.intention,
-              answer: follow.answer,
-              type: "followup",
-              source: "ai"
-            }
-          ]);
-        }
-      const feedback = response?.feedback || {};
-
-      if (!feedback) return;
-
-      pushFeedback({
-        index: currentIndex,
-        question: currentQuestion.question,
-        answer: answerText.trim(),
-        feedback
-      });
-
-      setLatestFeedback(feedback);
-
-      if (sessionMode === "real"){
-        speakText(
-          feedback?.strengths?.[0]
-            ? `Good answer. ${feedback.strengths[0]}`
-            : "Answer received."
-        );
       }
+    }
 
-      window.clearTimeout(advanceTimeoutRef.current);
-      advanceTimeoutRef.current = window.setTimeout(() => {
+    const feedback = response?.feedback;
+
+    if (!feedback) return;
+
+    pushFeedback({
+      index: currentIndex,
+      question: currentQuestion.question,
+      answer: answerText.trim(),
+      feedback
+    });
+
+    setLatestFeedback(feedback);
+
+    // 🔊 SPEECH (SAFE)
+    if (sessionMode === "real") {
+      speakText(
+        feedback?.strengths?.[0]
+          ? `Good answer. ${feedback.strengths[0]}`
+          : "Answer received."
+      );
+    }
+
+    // ⏭️ NEXT QUESTION (SAFE DELAY)
+    window.clearTimeout(advanceTimeoutRef.current);
+
+    advanceTimeoutRef.current = window.setTimeout(() => {
+    setStatus((currentStatus) => {
+      if (currentStatus !== "terminated") {
         moveToNextQuestion();
-      }, 1400);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+      }
+      return currentStatus;
+    });
+  }, 1400);
 
-  const handleMicToggle = () => {
-    if (!recognitionRef.current) {
-      setIsTextMode(true);
-      return;
-    }
+  } catch (err) {
+    console.error("Submit error:", err);
+  } finally {
+    setIsSubmitting(false);
+  }
+};
 
-    if (isListening) {
+ const handleMicToggle = () => {
+  if (!recognitionRef.current) {
+    setIsTextMode(true);
+    return;
+  }
+
+  if (isListening) {
+    try {
       recognitionRef.current.stop();
-      setIsListening(false);
-      return;
-    }
+    } catch (err) {}
+    setIsListening(false);
+    return;
+  }
 
+  try {
     recognitionRef.current.start();
     setIsListening(true);
-  };
+  } catch (err) {
+    console.warn("Mic start error:", err);
+  }
+};
 
-  const handleTryAgain = () => {
+const handleTryAgain = () => {
     setAnswerText("");
     setLatestFeedback(null);
 
@@ -427,16 +550,18 @@ const Mock = () => {
     setTimeLeft(sessionDuration * 60);
   }, [ sessionDuration ]);
 
-  useEffect(() => {
-    syncQuestionQueue();
-  }, [
-    report,
-    interviewId,
-    questionTypes.behavioral,
-    questionTypes.technical,
-    questionTypes.systemDesign,
-    selectedDifficulty
-  ]);
+useEffect(() => {
+  if (!sessionStarted && questionQueue.length === 0 && report) {
+  syncQuestionQueue();
+}
+}, [
+  report,
+  interviewId,
+  questionTypes.behavioral,
+  questionTypes.technical,
+  questionTypes.systemDesign,
+  selectedDifficulty
+]);
 
   useEffect(() => {
     if (!sessionStarted || !currentQuestion?.question) return;
@@ -444,22 +569,20 @@ const Mock = () => {
   }, [ currentQuestion?.id, sessionStarted, selectedVoice ]);
 
   useEffect(() => {
-    if (!sessionStarted || timeLeft <= 0) return;
+  const handleTabSwitch = () => {
+    if (document.hidden && sessionId && sessionStarted) {
+      sendMonitorEvent({ sessionId, type: "tab_switch" });
 
-    const timer = window.setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          setSessionStarted(false);
-          handleEndInterview(); // 🔥 CALL END INTERVIEW
-          return 0;
-        }
+      // 🔥 OPTIONAL: local penalty UI
+      // setTrustScore(prev => Math.max(prev - 10, 0));
+    }
+  };
 
-        return prev - 1;
-      });
-    }, 1000);
+  document.addEventListener("visibilitychange", handleTabSwitch);
 
-    return () => window.clearInterval(timer);
-  }, [ sessionStarted, timeLeft ]);
+  return () =>
+    document.removeEventListener("visibilitychange", handleTabSwitch);
+}, [sessionId,sessionStarted]);
 
   useEffect(() => {
     const SpeechRecognition =
@@ -492,6 +615,36 @@ const Mock = () => {
     };
   }, []);
 
+useEffect(() => {
+  if (!sessionStarted || !recognitionRef.current) return;
+
+  if (!isMicActiveRef.current) {
+    try {
+      recognitionRef.current.start();
+      setIsListening(true);
+      isMicActiveRef.current = true;
+    } catch (err) {
+      isMicActiveRef.current = false; // 🔥 reset
+      console.warn("Mic start blocked:", err);
+    }
+  }
+}, [currentIndex, sessionStarted]);
+
+useEffect(() => {
+  if (!recognitionRef.current) return;
+
+  recognitionRef.current.onend = () => {
+    setIsListening(false);
+    isMicActiveRef.current = false; // 🔥 RESET
+  };
+
+  recognitionRef.current.onerror = () => {
+    setIsListening(false);
+    isMicActiveRef.current = false; // 🔥 RESET
+  };
+}, []);
+
+
   useEffect(() => {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }, [currentIndex]);
@@ -521,42 +674,53 @@ const Mock = () => {
     };
   }, [ selectedVoice ]);
 
+ 
   useEffect(() => {
-    let cancelled = false;
+  let cancelled = false;
 
-    if (!sessionStarted || !navigator.mediaDevices?.getUserMedia) {
-      stopCamera();
-      return undefined;
-    }
+  if (!sessionStarted || !navigator.mediaDevices?.getUserMedia) {
+    stopCamera();
+    return;
+  }
 
-    const startCamera = async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+  const startCamera = async () => {
+    try {
+       if (cameraStreamRef.current) return;
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
 
-        if (cancelled) {
-          stream.getTracks().forEach((track) => track.stop());
-          return;
-        }
-
-        cameraStreamRef.current = stream;
-
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
-
-        setCameraReady(true);
-      } catch (error) {
-        setCameraReady(false);
+      if (cancelled) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
       }
-    };
 
-    startCamera();
+      cameraStreamRef.current = stream;
 
-    return () => {
-      cancelled = true;
-      stopCamera();
-    };
-  }, [ sessionStarted ]);
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+
+      setCameraReady(true);
+
+    } catch (error) {
+      alert("Camera not available. Continuing without camera.");
+      setCameraReady(false);
+
+      if (sessionId) {
+        sendMonitorEvent({
+          sessionId,
+          type: "camera_blocked"
+        });
+      }
+    }
+  };
+
+  startCamera();
+
+  return () => {
+    cancelled = true;
+    stopCamera();
+  };
+}, [sessionStarted, sessionId]);
 
   useEffect(
     () => () => {
@@ -566,42 +730,163 @@ const Mock = () => {
     []
   );
 
+  useEffect(() => {
+  const handleFullscreenChange = () => {
+    if (!document.fullscreenElement && sessionStarted) {
+  if (!fullscreenWarningRef.current) {
+    fullscreenWarningRef.current = true;
+
+    alert("You cannot exit fullscreen during interview!");
+
+    setTimeout(() => {
+      fullscreenWarningRef.current = false;
+    }, 3000);
+  }
+
+  enterFullScreen();
+}
+  };
+
+  document.addEventListener("fullscreenchange", handleFullscreenChange);
+
+  return () =>
+    document.removeEventListener("fullscreenchange", handleFullscreenChange);
+}, [sessionStarted,sessionId]);
+const triggerViolation = async (type, message) => {
+  if (violationCooldownRef.current) return;
+
+  violationCooldownRef.current = true;
+
+  alert(message);
+
+  const res = await sendMonitorEvent({ sessionId, type });
+
+  if (res?.status === "terminated") {
+    alert("❌ Interview terminated due to violations");
+    navigate(`/interview/${interviewId}`);
+  }
+
+  setTimeout(() => {
+    violationCooldownRef.current = false;
+  }, 2000);
+};
+
+useEffect(() => {
+  const handleKeyDown = (e) => {
+    if (!sessionStarted || !sessionId) return;
+
+    const isCopy = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c";
+    const isPaste = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v";
+
+    if (isCopy || isPaste) {
+      e.preventDefault();
+
+      // 🔥 UPDATED
+      triggerViolation(
+        isCopy ? "copy_attempt" : "paste_attempt",
+        "⚠️ Copy/Paste is not allowed!"
+      );
+    }
+  };
+
+  const handlePaste = (e) => {
+    if (!sessionStarted || !sessionId) return;
+
+    e.preventDefault();
+
+    // 🔥 UPDATED
+    triggerViolation("paste_attempt", "⚠️ Pasting is blocked!");
+  };
+
+  const handleCopy = (e) => {
+    if (!sessionStarted || !sessionId) return;
+
+    e.preventDefault();
+
+    // 🔥 UPDATED
+    triggerViolation("copy_attempt", "⚠️ Copying is blocked!");
+  };
+
+  const handleContextMenu = (e) => {
+    if (!sessionStarted || !sessionId) return;
+
+    e.preventDefault();
+
+    // 🔥 UPDATED
+    triggerViolation("right_click", "⚠️ Right click disabled!");
+  };
+
+  window.addEventListener("keydown", handleKeyDown);
+  window.addEventListener("paste", handlePaste);
+  window.addEventListener("copy", handleCopy);
+  window.addEventListener("contextmenu", handleContextMenu);
+
+  return () => {
+    window.removeEventListener("keydown", handleKeyDown);
+    window.removeEventListener("paste", handlePaste);
+    window.removeEventListener("copy", handleCopy);
+    window.removeEventListener("contextmenu", handleContextMenu);
+  };
+}, [sessionStarted, sessionId]);
+
   return (
-    <div className="mock-page">
+    <div className={`mock-page ${sessionStarted ? "mock-page--in-session" : ""}`}>
+      {!sessionStarted && <Navbar />}
+        
+
       <div className="mock-shell">
         <header className="mock-topbar">
           <div className="mock-topbar__brand">
             <span className="mock-topbar__brand-mark">
-              <BotIcon />
+              <Sparkles size={16} />
             </span>
             <div>
-              <strong>AI Interview</strong>
-              <span>Premium practice cockpit</span>
+              <strong>PrepAI Studio</strong>
+              <span>{sessionStarted ? "Live Assessment Active" : "Interactive Interview Cockpit"}</span>
             </div>
           </div>
 
           <div className="mock-topbar__stats">
-            <div className="mock-stat-pill mock-stat-pill--timer">
-              <span className="mock-stat-pill__label">Timer</span>
+            <div className={`mock-stat-pill mock-stat-pill--timer ${timeLeft < 180 ? "mock-stat-pill--urgent" : ""}`}>
+              <Clock size={13} />
+              <span className="mock-stat-pill__label">Time</span>
               <strong>{formatTime(timeLeft)}</strong>
             </div>
+
             <div className="mock-stat-pill">
-              <span className="mock-stat-pill__label">Progress</span>
+              <span className="mock-stat-pill__label">Question</span>
               <strong>{currentProgress}</strong>
             </div>
+
+            {sessionStarted && (
+              <div className={`mock-stat-pill mock-stat-pill--trust ${trustScore > 75 ? "trust--high" : trustScore > 50 ? "trust--mid" : "trust--low"}`}>
+                <ShieldCheck size={13} />
+                <span className="mock-stat-pill__label">Trust</span>
+                <strong>{trustScore}%</strong>
+              </div>
+            )}
           </div>
 
           <div className="mock-topbar__actions">
-            <button type="button" className="mock-topbar__action">Help</button>
-            <button type="button" className="mock-topbar__action">Alerts</button>
-            <button
-              type="button"
-              className="mock-topbar__profile"
-              onClick={() => navigate(interviewId ? `/interview/${interviewId}` : "/")}
-            >
-              <span className="mock-topbar__profile-dot" />
-              <span>Back</span>
-            </button>
+            {sessionStarted ? (
+              <button
+                type="button"
+                className="mock-end-session-btn"
+                onClick={handleEndInterview}
+                title="Conclude interview and review full report"
+              >
+                <Square size={13} /> End &amp; View Report
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="mock-topbar__profile"
+                onClick={() => navigate(interviewId ? `/interview/${interviewId}` : "/")}
+              >
+                <ArrowLeft size={14} />
+                <span>Exit Studio</span>
+              </button>
+            )}
           </div>
         </header>
 
@@ -742,11 +1027,19 @@ const Mock = () => {
                 type="button"
                 className="mock-primary-btn"
                 onClick={() => {
+                  enterFullScreen();
                   resetFeedback();
                   setLatestFeedback(null);
                   setCurrentIndex(0);
                   setAnswerText("");
+
+                  // 🔥 RESET SESSION STATE (ADD THIS)
+                  setSessionId(null);
+                  setTrustScore(100);
+                  setStatus("active");
+
                   setSessionStarted(true);
+                  setConversation([]);
                   setTimeLeft(sessionDuration * 60);
                 }}
                 disabled={!questionQueue.length || isGeneratingQuestion}
@@ -837,11 +1130,11 @@ const Mock = () => {
 
                   <div className="mock-question__voice-status">
                     <strong>{isListening ? "Recording answer" : "Voice mode ready"}</strong>
-                    <span>{sessionMode === "ai" ? "Live AI interview" : "Practice evaluation"}</span>
+                    <span>{sessionMode === "real" ? "Live AI interview" : "Practice evaluation"}</span>
                   </div>
                 </div>
 
-                <div className="mock-camera">
+                {/* <div className="mock-camera">
                   {cameraReady ? (
                     <video ref={videoRef} autoPlay muted playsInline />
                   ) : (
@@ -850,7 +1143,7 @@ const Mock = () => {
                       <span>Camera Preview</span>
                     </div>
                   )}
-                </div>
+                </div> */}
               </section>
 
               <section className="mock-composer">
@@ -1012,6 +1305,25 @@ const Mock = () => {
               </footer>
             </section>
           </aside>
+
+          {sessionStarted && (
+          cameraReady ? (
+            <CameraView videoRef={videoRef} />
+          ) : (
+            <div style={{
+              position: "fixed",
+              bottom: "10px",
+              right: "10px",
+              background: "#222",
+              color: "#fff",
+              padding: "10px",
+              borderRadius: "8px"
+            }}>
+              Camera not available
+            </div>
+          )
+        )}
+
         </div>
       </div>
     </div>

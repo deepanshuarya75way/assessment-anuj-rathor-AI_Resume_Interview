@@ -6,9 +6,9 @@ import api from "../../../utils/api"
 export const generateInterviewReport = async ({ jobDescription, selfDescription, resumeFile }) => {
 
     const formData = new FormData()
-    formData.append("jobDescription", jobDescription)
-    formData.append("selfDescription", selfDescription)
-    formData.append("resume", resumeFile)
+    if (jobDescription) formData.append("jobDescription", jobDescription)
+    if (selfDescription) formData.append("selfDescription", selfDescription)
+    if (resumeFile) formData.append("resume", resumeFile)
 
     const response = await api.post("/api/interview/", formData, {
         headers: {
@@ -102,24 +102,24 @@ export const generateFollowUp = async ({ question, answer }) => {
 };
 
 // get evaluation for mock 
-// export const evaluateMockAnswer = async ({ question, answer }) => {
-//   const res = await api.post("/api/interview/mock/evaluate", {
-//     question,
-//     answer
-//   });
+export const evaluateMockAnswer = async ({ question, answer }) => {
+  const res = await api.post("/api/interview/mock/evaluate", {
+    question,
+    answer
+  });
 
-//   return res.data;
-// };
+  return res.data;
+};
 
-// export const generateQuestion = async ({ topic, type,difficulty }) => {
-//   const res = await api.post("/api/interview/mock/generate-question", {
-//     topic,
-//     type,
-//     difficulty
-//   });
+export const generateQuestion = async ({ topic, type,difficulty }) => {
+  const res = await api.post("/api/interview/mock/generate-question", {
+    topic,
+    type,
+    difficulty
+  });
 
-//   return res.data;
-// };
+  return res.data;
+};
 
 // 🔥 UPDATE ROADMAP DAY
 export const updateRoadmap = async (interviewId, day, tasks) => {
@@ -131,5 +131,12 @@ export const updateRoadmap = async (interviewId, day, tasks) => {
   return api.put(`/api/interview/${interviewId}/roadmap/${day}`, {
     tasks
   });
+};
+
+// 🔥 RE-ANALYZE INTERVIEW REPORT
+export const reAnalyzeReport = async (interviewId) => {
+  if (!interviewId) return null;
+  const res = await api.post(`/api/interview/${interviewId}/re-analyze`);
+  return res.data;
 };
 

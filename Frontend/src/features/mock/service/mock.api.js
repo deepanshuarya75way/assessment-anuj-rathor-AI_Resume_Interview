@@ -24,6 +24,6 @@ export const endInterview = async ({ sessionId, feedback }) => {
 
 // 💬 FOLLOW-UP
 export const generateFollowUp = async (data) => {
-  const res = await api.post("/interview/follow-up", data);
+  const res = await api.post("/api/interview/follow-up", data);
   return res.data;
 };

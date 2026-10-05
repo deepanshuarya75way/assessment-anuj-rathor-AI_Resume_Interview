@@ -3,7 +3,10 @@ const TRUST_PENALTIES = {
   no_face: 15,
   multi_face: 25,
   silence: 10,
-  camera_off: 20
+  camera_off: 20,
+  copy_attempt: 15,
+  paste_attempt: 20,
+  right_click: 10,
 };
 
 const TRUST_THRESHOLD = 50;

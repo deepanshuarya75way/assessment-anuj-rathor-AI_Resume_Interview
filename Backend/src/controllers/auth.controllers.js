@@ -35,8 +35,8 @@ async function registerUser(req, res) {
     password: hash
   });
 
-   // ✅ SEND MAIL (non-blocking safe)
-  await sendMail("register", user);
+   // Send email asynchronously in background (non-blocking)
+  sendMail("register", user).catch((err) => console.error("Register mail error:", err.message));
 
   const token = jwt.sign(
     { id: user._id, username: user.username },
@@ -44,15 +44,18 @@ async function registerUser(req, res) {
     { expiresIn: "1d" }
   );
 
- res.cookie("token", token, {
-  httpOnly: true,
-  secure: true,
-  sameSite: "None",
-  path: "/"
-});
+  const isProduction = process.env.NODE_ENV === "production" || process.env.RENDER === "true" || process.env.VERCEL;
+  res.cookie("token", token, {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? "none" : "lax",
+    path: "/",
+    maxAge: 24 * 60 * 60 * 1000
+  });
 
   res.status(201).json({
     message: "User registered successfully",
+    token,
     user: {
       id: user._id,
       username: user.username,
@@ -87,9 +90,8 @@ async function loginUser(req, res) {
     });
   }
 
-   // ✅ SEND LOGIN ALERT MAIL
-  
-  await sendMail("login", user);
+   // Send login alert asynchronously in background (non-blocking)
+  sendMail("login", user).catch((err) => console.error("Login alert mail error:", err.message));
 
   const token = jwt.sign(
     { id: user._id, username: user.username },
@@ -97,15 +99,18 @@ async function loginUser(req, res) {
     { expiresIn: "1d" }
   );
 
+  const isProduction = process.env.NODE_ENV === "production" || process.env.RENDER === "true" || process.env.VERCEL;
   res.cookie("token", token, {
-  httpOnly: true,
-  secure: true,
-  sameSite: "None",
-  path: "/"
-});
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? "none" : "lax",
+    path: "/",
+    maxAge: 24 * 60 * 60 * 1000
+  });
 
   res.status(200).json({
     message: "User logged in successfully",
+    token,
     user: {
       id: user._id,
       username: user.username,
@@ -187,15 +192,18 @@ async function loginWithOtp(req, res) {
       { expiresIn: "1d" }
     );
 
+    const isProduction = process.env.NODE_ENV === "production" || process.env.RENDER === "true" || process.env.VERCEL;
     res.cookie("token", token, {
       httpOnly: true,
-      secure: true,
-      sameSite: "None",
-      path: "/"
+      secure: isProduction,
+      sameSite: isProduction ? "none" : "lax",
+      path: "/",
+      maxAge: 24 * 60 * 60 * 1000
     });
 
     return res.status(200).json({
       message: "Login successful (OTP)",
+      token,
       user: {
         id: user._id,
         username: user.username,
@@ -211,24 +219,31 @@ async function loginWithOtp(req, res) {
   }
 }
 
-// logout user
 const logoutUser = async (req, res) => {
-  const token = req.cookies.token;
-
-  if (!token) {
-    return res.status(400).json({ message: "No token provided" });
-  }
-
   try {
-    const blackListToken = new BlackListToken({ token });
-    await blackListToken.save();
+    const authHeader = req.headers.authorization || req.headers.Authorization;
+    const token = (authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null) || req.cookies?.token;
 
-    res.clearCookie("token");
+    if (token) {
+      try {
+        const blackListToken = new BlackListToken({ token });
+        await blackListToken.save();
+      } catch (e) {
+        // ignore duplicate blacklist
+      }
+    }
+
+    const isProduction = process.env.NODE_ENV === "production" || process.env.RENDER === "true" || process.env.VERCEL;
+    res.clearCookie("token", {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? "none" : "lax",
+      path: "/"
+    });
 
     return res.status(200).json({ 
       message: "User logged out successfully" 
     });
-
   } catch (error) {
     console.error("Logout Error:", error);
 

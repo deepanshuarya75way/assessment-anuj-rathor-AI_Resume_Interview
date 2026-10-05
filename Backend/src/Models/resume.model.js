@@ -20,47 +20,158 @@ const resumeSchema = new mongoose.Schema({
     trim: true
   },
 
-  phone: String,
-  linkedin: String,
-  github: String,
+   phone: {
+      type: String,
+      trim: true
+    },
+   linkedin: {
+      type: String,
+      trim: true
+    },
 
-  summary: String,
+    github: {
+      type: String,
+      trim: true
+    },
+
+    summary: {
+      type: String,
+      default: ""
+    },
 
   skills: {
     type: [String],
     default: []
   },
 
-  projects: [
-    {
-      title: String,
-      description: String,
-      techStack: [String]
-    }
-  ],
+   projects: [
+      {
+        title: {
+          type: String,
+          trim: true
+        },
 
-  experience: [
-    {
-      company: String,
-      role: String,
-      duration: String,
-      points: [String]
-    }
-  ],
+        description: {
+          type: String,
+          trim: true
+        },
 
-  education: [
-    {
-      institute: String,
-      degree: String,
-      year: String
-    }
-  ],
+        techStack: {
+          type: [String],
+          default: []
+        },
 
-  template: {
-    type: String,
-    default: "modern"
+        github: String,
+        liveLink: String
+      }
+    ],
+
+ 
+    experience: [
+      {
+        company: {
+          type: String,
+          trim: true
+        },
+
+        role: {
+          type: String,
+          trim: true
+        },
+
+        duration: {
+          type: String,
+          trim: true
+        },
+
+        points: {
+          type: [String],
+          default: []
+        }
+      }
+    ],
+
+    education: [
+      {
+        institute: {
+          type: String,
+          trim: true
+        },
+
+        degree: {
+          type: String,
+          trim: true
+        },
+
+        year: {
+          type: String,
+          trim: true
+        }
+      }
+    ],
+  // ✅ ATS FEATURES
+    atsScore: {
+      type: Number,
+      default: 0
+    },
+
+    jobTarget: {
+      type: String,
+      default: ""
+    },
+
+    lastAnalyzedAt: {
+      type: Date
+    },
+
+    // ✅ TEMPLATE + DESIGN
+    template: {
+      type: String,
+      default: "modern"
+    },
+
+    theme: {
+      type: String,
+      default: "light"
+    },
+
+    fontScale: {
+      type: Number,
+      default: 1
+    },
+
+    customizations: {
+      accentColor: {
+        type: String,
+        default: "#2563eb"
+      },
+
+      fontFamily: {
+        type: String,
+        default: "Inter"
+      },
+
+      spacing: {
+        type: Number,
+        default: 1
+      }
+    },
+
+    // ✅ PUBLIC SHARING
+    shareId: {
+      type: String,
+      unique: true,
+      sparse: true
+    },
+
+    public: {
+      type: Boolean,
+      default: false
+    }
+  },
+  {
+    timestamps: true
   }
-
-}, { timestamps: true });
+);
 
 module.exports = mongoose.model("Resume", resumeSchema);

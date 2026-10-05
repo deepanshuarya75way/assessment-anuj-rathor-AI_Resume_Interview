@@ -43,7 +43,7 @@ export const useInterview = () => {
 
     } catch (err) {
       console.error(err);
-      return null;
+      throw err;
     } finally {
       setLoading(false);
     }
@@ -70,18 +70,12 @@ export const useInterview = () => {
   // 🔥 GET ALL REPORTS
   const getReports = async () => {
     try {
-      setLoading(true);
-
       const res = await getAllInterviewReports();
       setReports(res?.interviewReports || []);
-
       return res?.interviewReports || [];
-
     } catch (err) {
       console.error(err);
       return [];
-    } finally {
-      setLoading(false);
     }
   };
 

@@ -1,32 +1,44 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import API from "../../../utils/api";
 
 export const useMock = () => {
   const [loading, setLoading] = useState(false);
   const [feedbackHistory, setFeedbackHistory] = useState([]);
 
-  // 🧠 GENERATE QUESTION (using follow-up API)
+  const abortRef = useRef(null);
+
+  // 🧠 GENERATE QUESTION
   const generateQuestion = async ({ topic, type, difficulty }) => {
     try {
-      const res = await API.post("/interview/follow-up", {
-        question: topic || "General interview question",
-        answer: "Generate a question",
-        type,
-        difficulty
-      });
+      abortRef.current?.abort();
+      abortRef.current = new AbortController();
 
-      const q = res.data?.[0];
+      const res = await API.post(
+        "/api/interview/mock/generate-question",
+        { topic, type, difficulty },
+        { signal: abortRef.current.signal }
+      );
+
+      const q = res.data?.data || res.data?.[0] || res.data;
 
       return {
-        question: q?.question || "Tell me about a challenging project.",
+        question:
+          q?.question ||
+          (topic
+            ? `Explain your experience with ${topic}`
+            : "Tell me about yourself."),
         intention: q?.intention || "Practice question"
       };
 
     } catch (err) {
-      console.error("Generate Question Error:", err);
+      if (err.name !== "CanceledError") {
+        console.error("Generate Question Error:", err);
+      }
 
       return {
-        question: "Tell me about a challenging project."
+        question: topic
+          ? `Explain your experience with ${topic}`
+          : "Tell me about yourself."
       };
     }
   };
@@ -36,10 +48,10 @@ export const useMock = () => {
     try {
       setLoading(true);
 
-      const res = await API.post("/interview/evaluate", {
-        question,
-        answer
-      });
+      const res = await API.post(
+        "/api/interview/mock/evaluate",
+        { question, answer }
+      );
 
       return res.data;
 
@@ -64,7 +76,11 @@ export const useMock = () => {
     try {
       setLoading(true);
 
-      const res = await API.post("/interview/live", data);
+      const res = await API.post(
+        "/api/interview/live",
+        data
+      );
+
       return res.data;
 
     } catch (err) {
@@ -76,9 +92,12 @@ export const useMock = () => {
     }
   };
 
-  // 📊 STORE FEEDBACK
+  // 📊 STORE FEEDBACK (LIMITED)
   const pushFeedback = (item) => {
-    setFeedbackHistory(prev => [...prev, item]);
+    setFeedbackHistory(prev => {
+      const updated = [...prev, item];
+      return updated.slice(-10); // 🔥 keep last 10
+    });
   };
 
   // 🔄 RESET SESSION

@@ -1,14 +1,74 @@
+@use "./styles/design-tokens.scss" as tokens;
 @use "./styles/button.scss";
+@use "./features/interview/style/navbar.scss";
 
-*{
-  margin: 0%;
-  padding: 0%;
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
   box-sizing: border-box;
 }
-html, body, #root{
+
+html, body {
   width: 100%;
-  height: 100%;
-  background-color: #000;
-  // color: whitesmoke;
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  min-height: 100%;
+  background-color: var(--prepai-bg-base);
+  color: var(--prepai-text-primary);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+
+#root {
+  width: 100%;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background-color: var(--prepai-bg-base);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--prepai-bg-base);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--prepai-bg-surface-elevated);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--prepai-border-subtle);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--prepai-brand-primary-dark);
+}
+
+/* Accessibility Focus Rings */
+:focus-visible {
+  outline: 2px solid var(--prepai-border-focus);
+  outline-offset: 2px;
+}
+
+/* Selection Color */
+::selection {
+  background-color: var(--prepai-brand-primary);
+  color: #ffffff;
+}
+
+/* Smooth motion respect */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useContext } from "react";
+import { ResumeContext } from "../context/resume.context";
 import api from "../../../utils/api";
 import {
   analyzeResume,
   getResume,
   improveResume,
   saveResume,
+  getResumeErrorMessage,
 } from "../services/resume.api";
 
 const sectionKeys = [
@@ -34,7 +36,7 @@ const defaultProject = {
   role: "Full Stack Developer",
   stack: "React, Node.js, MongoDB, AI APIs",
   liveUrl: "https://resumeforge-ai.vercel.app",
-  githubUrl: "https://github.com/krishgupta-dev/ai-interview-tool",
+  githubUrl: "",
   points: [
     "Built an AI-powered platform that analyzes resumes and job descriptions to generate personalized interview questions.",
     "Implemented JWT authentication, ATS scoring, and resume improvement recommendations.",
@@ -52,14 +54,14 @@ const defaultEducation = {
 };
 
 const baseResume = {
-  name: "Krish Gupta",
+  name: "Your Full Name",
   role: "Full Stack Developer",
   phone: "+91 7465982627",
-  email: "krish23153106@akgec.ac.in",
-  github: "https://github.com/krishgupta-dev",
-  linkedin: "https://linkedin.com/in/krish-gupta-dev",
-  leetcode: "https://leetcode.com/u/krishgupta",
-  portfolio: "https://krish-resumeforge.vercel.app",
+  email: "candidate@example.com",
+  github: "",
+  linkedin: "",
+  leetcode: "",
+  portfolio: "",
   location: "Ghaziabad, Uttar Pradesh",
   summary:
     "Full Stack Developer with experience building scalable web applications using React.js, Node.js, Express.js, and MongoDB. Strong in secure authentication, ATS optimization, AI API integrations, and recruiter-friendly product delivery.",
@@ -85,7 +87,7 @@ const baseResume = {
       role: "Backend Engineer",
       stack: "Node.js, Express, MongoDB",
       liveUrl: "https://ledger-demo.render.com",
-      githubUrl: "https://github.com/krishgupta-dev/banking-ledger-system",
+      githubUrl: "",
       points: [
         "Architected a secure double-entry ledger system with atomic MongoDB transactions.",
         "Designed idempotent transaction handling to prevent duplicate financial operations.",
@@ -250,63 +252,211 @@ const normalizeResume = (data) => {
   };
 };
 
-export const useResume = (id) => {
-  const [resume, setResume] = useState(baseResume);
-  const [analytics, setAnalytics] = useState(baseAnalytics);
-  const [lastAnalyzed, setLastAnalyzed] = useState("");
-
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const data = await getResume();
-
-        if (data?.resume) {
-          setResume(normalizeResume(data.resume));
-        }
-      } catch (err) {
-        console.log("Load resume failed", err);
-      }
+/**
+ * Real ATS scoring calculation based on actual resume completeness & signal depth
+ */
+export function calculateLiveATS(resume, jobDescription = "") {
+  if (!resume) {
+    return {
+      score: 0,
+      breakdown: { contact: 0, summary: 0, experience: 0, projects: 0, skills: 0, education: 0 },
+      formattingIssues: ["No resume data provided."],
+      suggestions: ["Start by filling in your identity and contact information."],
+      keywords: [],
+      missingKeywords: [],
+      percentile: "Unranked"
     };
+  }
 
-    load();
-  }, []);
+  let contactScore = 0;
+  if (resume.name?.trim()) contactScore += 4;
+  if (resume.email?.includes("@")) contactScore += 4;
+  if (resume.phone?.trim()) contactScore += 4;
+  if (resume.location?.trim()) contactScore += 4;
+  if (resume.github?.trim() || resume.linkedin?.trim() || resume.portfolio?.trim()) contactScore += 4;
 
-  useEffect(() => {
-    if (!resume) return;
+  let summaryScore = 0;
+  const summaryLen = (resume.summary || "").trim().length;
+  if (summaryLen > 0) summaryScore += 5;
+  if (summaryLen >= 150 && summaryLen <= 650) summaryScore += 10;
+  else if (summaryLen > 50) summaryScore += 5;
 
-    const timer = setTimeout(() => {
-      saveResume(resume);
-    }, 1000);
+  let experienceScore = 0;
+  const exps = resume.experience || [];
+  if (exps.length > 0) {
+    experienceScore += 10;
+    const hasDetails = exps.some(e => e.title && e.company);
+    if (hasDetails) experienceScore += 5;
+    
+    // Check for metrics/numbers in bullets
+    const allBullets = exps.flatMap(e => e.points || []);
+    const metricRegex = /(\d+%|\d+\+|\d+k|\b\d+\b|reduced|increased|optimized|scaled|engineered|architected)/i;
+    const hasMetrics = allBullets.some(b => metricRegex.test(b));
+    if (hasMetrics) experienceScore += 5;
+    if (allBullets.length >= 3) experienceScore += 5;
+  }
 
-    return () => clearTimeout(timer);
-  }, [resume]);
+  let projectScore = 0;
+  const projs = resume.projects || [];
+  if (projs.length > 0) {
+    projectScore += 10;
+    const hasStack = projs.some(p => p.stack?.trim());
+    if (hasStack) projectScore += 5;
+    const projBullets = projs.flatMap(p => p.points || []);
+    if (projBullets.length >= 2) projectScore += 5;
+  }
 
-  useEffect(() => {
-    if (!resume) return;
+  let skillsScore = 0;
+  const skillsCount = (resume.skills || []).length;
+  if (skillsCount >= 4) skillsScore += 8;
+  if (skillsCount >= 8) skillsScore += 7;
 
-    const current = JSON.stringify(resume);
+  let educationScore = 0;
+  if ((resume.education || []).some(e => e.school || e.degree)) educationScore += 5;
 
-    if (current === lastAnalyzed) return;
+  const totalScore = Math.min(100, Math.round(contactScore + summaryScore + experienceScore + projectScore + skillsScore + educationScore));
 
-    const timer = setTimeout(async () => {
-      try {
-        const data = await analyzeResume(resume);
+  const formattingIssues = [];
+  const suggestions = [];
 
-        if (data?.analysis) {
-          setAnalytics((prev) => ({
-            ...prev,
-            ...data.analysis,
-          }));
-          setLastAnalyzed(current);
+  if (!resume.email || !resume.phone) {
+    formattingIssues.push("Missing critical contact details (email or phone).");
+  }
+  if (summaryLen < 150) {
+    formattingIssues.push("Professional summary is too brief for ATS parsing (aim for 300-500 characters).");
+  }
+  if (exps.length === 0) {
+    suggestions.push("Add at least one professional work experience or internship.");
+  } else {
+    const allBullets = exps.flatMap(e => e.points || []);
+    const metricCount = allBullets.filter(b => /(\d+%|\d+\+|\d+k)/i.test(b)).length;
+    if (metricCount === 0) {
+      suggestions.push("Add quantifiable metrics (e.g., '% latency reduction', 'number of users served') to your experience bullets.");
+    }
+  }
+
+  if (projs.length === 0) {
+    suggestions.push("Feature 2-3 technical projects demonstrating your core stack.");
+  }
+  if (skillsCount < 6) {
+    suggestions.push("Expand your skills list with databases, cloud tools, and modern frameworks.");
+  }
+
+  // Job description matching if provided
+  let matchedKeywords = [];
+  let missingKeywords = [];
+  if (jobDescription && jobDescription.trim()) {
+    const jdLower = jobDescription.toLowerCase();
+    const commonKeywords = [
+      "react", "node", "typescript", "javascript", "python", "mongodb", "postgresql",
+      "redis", "docker", "aws", "ci/cd", "microservices", "system design", "rest api",
+      "graphql", "kubernetes", "sql", "git", "express", "next.js", "tailwind"
+    ];
+    const resumeText = JSON.stringify(resume).toLowerCase();
+
+    commonKeywords.forEach(kw => {
+      if (jdLower.includes(kw)) {
+        if (resumeText.includes(kw)) {
+          matchedKeywords.push(kw.toUpperCase());
+        } else {
+          missingKeywords.push(kw.toUpperCase());
         }
-      } catch (err) {
-        console.log("ATS error", err);
       }
-    }, 900);
+    });
+  } else {
+    matchedKeywords = (resume.skills || []).slice(0, 4);
+    missingKeywords = ["Docker", "CI/CD", "System Design", "Cloud Infrastructure"].filter(
+      k => !(resume.skills || []).some(s => s.toLowerCase() === k.toLowerCase())
+    );
+  }
 
-    return () => clearTimeout(timer);
-  }, [resume, lastAnalyzed]);
+  let percentile = "Top 40%";
+  if (totalScore >= 85) percentile = "Top 5%";
+  else if (totalScore >= 75) percentile = "Top 15%";
+  else if (totalScore >= 60) percentile = "Top 30%";
 
+  return {
+    score: totalScore,
+    percentile,
+    breakdown: {
+      contact: Math.round((contactScore / 20) * 100),
+      summary: Math.round((summaryScore / 15) * 100),
+      experience: Math.round((experienceScore / 25) * 100),
+      projects: Math.round((projectScore / 20) * 100),
+      skills: Math.round((skillsScore / 15) * 100),
+      education: Math.round((educationScore / 5) * 100)
+    },
+    keywords: matchedKeywords.length ? matchedKeywords : (resume.skills || []).slice(0, 4),
+    missingKeywords: missingKeywords.length ? missingKeywords : ["CI/CD", "Docker", "Unit Testing"],
+    formattingIssues: formattingIssues.length ? formattingIssues : ["Ensure all bullet points end with periods.", "Keep links clean without https:// prefix."],
+    suggestions: suggestions.length ? suggestions : ["Move your strongest technical project to the top.", "Highlight cloud and deployment experience in summary."]
+  };
+}
+
+export const templateLibrary = [
+  {
+    key: "modern",
+    title: "Modern",
+    category: "Tech & Product",
+    rating: "4.9",
+    atsScore: "98%",
+    copy: "Clean single-column layout with subtle brand accent bar and crisp metadata.",
+  },
+  {
+    key: "professional",
+    title: "Professional",
+    category: "Corporate & Executive",
+    rating: "4.8",
+    atsScore: "99%",
+    copy: "Classic serif typography and traditional horizontal dividers for corporate roles.",
+  },
+  {
+    key: "tech",
+    title: "Tech / Developer",
+    category: "Software & Engineering",
+    rating: "5.0",
+    atsScore: "97%",
+    copy: "Developer-focused design with monospace tech tags and prominent project links.",
+  },
+  {
+    key: "minimal",
+    title: "Minimal",
+    category: "Design & Startups",
+    rating: "4.8",
+    atsScore: "99%",
+    copy: "Swiss-inspired minimalist layout with generous whitespace and quiet typography.",
+  },
+  {
+    key: "ats-classic",
+    title: "ATS Classic",
+    category: "ATS Universal",
+    rating: "4.9",
+    atsScore: "100%",
+    copy: "Strict top-down hierarchy engineered for 100% parseability by legacy ATS.",
+  },
+];
+
+export const useResume = (id) => {
+  const context = useContext(ResumeContext);
+  const [interviewData, setInterviewData] = useState(null);
+
+  if (!context) {
+    throw new Error("useResume must be used within ResumeProvider");
+  }
+
+  const {
+    resume,
+    updateResumeLocal,
+    improveResume,
+    analyzeResume: analyzeResumeCtx,
+    error,
+    loading,
+  } = context;
+
+  const activeResume = resume || normalizeResume(baseResume);
+  const liveAnalytics = calculateLiveATS(activeResume);
+
+  // Fetch interview data if ID provided
   useEffect(() => {
     if (!id) return;
 
@@ -314,24 +464,14 @@ export const useResume = (id) => {
       try {
         const res = await api.get(`/api/interview/report/${id}`);
         const report = res?.data?.interviewReport;
-
         if (!report) return;
 
-        setResume((prev) =>
-          normalizeResume({
-            ...prev,
-            role: report.selfDescription || prev.role,
-          })
-        );
-
-        if (report.skillGaps?.length) {
-          setAnalytics((prev) => ({
-            ...prev,
-            keywords: report.skillGaps.slice(0, 4).map((skill) => skill.skill),
-          }));
+        setInterviewData(report);
+        if (report.selfDescription) {
+          updateResumeLocal({ role: report.selfDescription });
         }
       } catch (err) {
-        console.log("Interview fetch failed", err);
+        console.warn("[useResume] Interview data fetch error:", err.message);
       }
     };
 
@@ -340,20 +480,57 @@ export const useResume = (id) => {
 
   const handleAIImprove = async () => {
     try {
-      const data = await improveResume(resume);
-
-      if (data?.resume) {
-        setResume(normalizeResume(data.resume));
+      const improved = await improveResume(activeResume);
+      if (improved) {
+        updateResumeLocal(normalizeResume(improved));
       }
     } catch (err) {
-      console.log("AI improve failed", err);
+      console.error("[useResume] AI improve failed:", err);
+      throw err;
     }
   };
 
+  const getErrorMessage = () => {
+    return getResumeErrorMessage(error);
+  };
+
   return {
-    resume,
-    setResume,
-    analytics,
+    resume: activeResume,
+    setResume: updateResumeLocal,
+    analytics: liveAnalytics,
+    calculateLiveATS,
     handleAIImprove,
+    error,
+    errorMessage: error ? getErrorMessage() : null,
+    loading,
+    interviewData,
+    templateLibrary,
+    templateFilters: [
+      { key: "all", label: "All Templates" },
+      { key: "tech", label: "Software & Tech" },
+      { key: "executive", label: "Executive" },
+      { key: "minimal", label: "Minimalist" }
+    ],
+    dashboardSidebar: [
+      { key: "builder", label: "Resume Builder" },
+      { key: "templates", label: "Browse Templates" },
+      { key: "ats", label: "ATS Scanner" },
+      { key: "cover-letter", label: "Cover Letter Generator" }
+    ],
+    recentResumes: [
+      { key: "1", name: activeResume.name, role: activeResume.role, template: activeResume.template || "tech" }
+    ],
+    dashboardStats: [
+      { key: "ats", label: "ATS Readiness", value: `${liveAnalytics.score}%` },
+      { key: "percentile", label: "Market Tier", value: liveAnalytics.percentile },
+      { key: "skills", label: "Verified Skills", value: `${activeResume.skills?.length || 0} skills` }
+    ],
+    dashboardSuggestion: {
+      eyebrow: "AI Recommendation",
+      title: "Elevate your Resume Impact",
+      copy: "Add quantifiable metrics to your recent projects to push your ATS score into the top 5% tier.",
+      action: "Optimize in Builder"
+    },
+    quickStartTemplates: templateLibrary.slice(0, 3)
   };
 };

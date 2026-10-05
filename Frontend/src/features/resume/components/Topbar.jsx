@@ -4,7 +4,7 @@ export default function Topbar({
   actionLabel = "Download PDF",
 }) {
   return (
-    <header className="resume-topbar">
+    <header className="resume-topbar glass-panel">
 
       <div>
         <h2>Alchemist AI</h2>
