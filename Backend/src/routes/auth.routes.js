@@ -13,6 +13,9 @@ router.post('/login', authController.loginUser);
 router.post("/login-otp/send", authController.sendLoginOtp);
 router.post("/login-otp/verify", authController.loginWithOtp);
 
+router.post("/refresh",authController.refreshAccessToken);
+
+
 // @routes get /api/auth/logout
 // @description Logout a user by blacklisting the token
 router.get('/logout', authController.logoutUser);

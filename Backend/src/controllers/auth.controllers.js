@@ -4,6 +4,19 @@ const jwt = require('jsonwebtoken');
 const BlackListToken = require("../Models/blacklist.models");
 const sendMail = require("../services/mail.service");
 
+const RefreshToken = require("../Models/refreshToken.model");
+const {
+  issueAuthTokrns,
+  createAccessToken,
+  createRefreshToken,
+  hashToken,
+  getCookieOptions,
+  clearAuthCookies,
+  REFRESH_TOKEN_MS,
+  issueAuthToken
+} = require("../utils/authToken");
+
+
 // @route registerUser
 async function registerUser(req, res) {
 
@@ -38,24 +51,27 @@ async function registerUser(req, res) {
    // Send email asynchronously in background (non-blocking)
   sendMail("register", user).catch((err) => console.error("Register mail error:", err.message));
 
-  const token = jwt.sign(
-    { id: user._id, username: user.username },
-    process.env.JWT_SECRET,
-    { expiresIn: "1d" }
-  );
+  // const token = jwt.sign(
+  //   { id: user._id, username: user.username },
+  //   process.env.JWT_SECRET,
+  //   { expiresIn: "1d" }
+  // );
 
-  const isProduction = process.env.NODE_ENV === "production" || process.env.RENDER === "true" || process.env.VERCEL;
-  res.cookie("token", token, {
-    httpOnly: true,
-    secure: isProduction,
-    sameSite: isProduction ? "none" : "lax",
-    path: "/",
-    maxAge: 24 * 60 * 60 * 1000
-  });
+  // const isProduction = process.env.NODE_ENV === "production" || process.env.RENDER === "true" || process.env.VERCEL;
+  // res.cookie("token", token, {
+  //   httpOnly: true,
+  //   secure: isProduction,
+  //   sameSite: isProduction ? "none" : "lax",
+  //   path: "/",
+  //   maxAge: 24 * 60 * 60 * 1000
+  // });
 
-  res.status(201).json({
+  const {accessToken} = await issueAuthToken(user,res);
+
+  return res.status(201).json({
     message: "User registered successfully",
-    token,
+    token: accessToken,
+    accessToken,
     user: {
       id: user._id,
       username: user.username,
@@ -93,24 +109,27 @@ async function loginUser(req, res) {
    // Send login alert asynchronously in background (non-blocking)
   sendMail("login", user).catch((err) => console.error("Login alert mail error:", err.message));
 
-  const token = jwt.sign(
-    { id: user._id, username: user.username },
-    process.env.JWT_SECRET,
-    { expiresIn: "1d" }
-  );
+  // const token = jwt.sign(
+  //   { id: user._id, username: user.username },
+  //   process.env.JWT_SECRET,
+  //   { expiresIn: "1d" }
+  // );
 
-  const isProduction = process.env.NODE_ENV === "production" || process.env.RENDER === "true" || process.env.VERCEL;
-  res.cookie("token", token, {
-    httpOnly: true,
-    secure: isProduction,
-    sameSite: isProduction ? "none" : "lax",
-    path: "/",
-    maxAge: 24 * 60 * 60 * 1000
-  });
+  // const isProduction = process.env.NODE_ENV === "production" || process.env.RENDER === "true" || process.env.VERCEL;
+  // res.cookie("token", token, {
+  //   httpOnly: true,
+  //   secure: isProduction,
+  //   sameSite: isProduction ? "none" : "lax",
+  //   path: "/",
+  //   maxAge: 24 * 60 * 60 * 1000
+  // });
 
-  res.status(200).json({
+  const {accessToken} = await issueAuthToken(user,res);
+
+  return res.status(200).json({
     message: "User logged in successfully",
-    token,
+    token : accessToken,
+    accessToken,
     user: {
       id: user._id,
       username: user.username,
@@ -186,24 +205,27 @@ async function loginWithOtp(req, res) {
     user.otpExpires = null;
     await user.save();
 
-    const token = jwt.sign(
-      { id: user._id, username: user.username },
-      process.env.JWT_SECRET,
-      { expiresIn: "1d" }
-    );
+    // const token = jwt.sign(
+    //   { id: user._id, username: user.username },
+    //   process.env.JWT_SECRET,
+    //   { expiresIn: "1d" }
+    // );
 
-    const isProduction = process.env.NODE_ENV === "production" || process.env.RENDER === "true" || process.env.VERCEL;
-    res.cookie("token", token, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? "none" : "lax",
-      path: "/",
-      maxAge: 24 * 60 * 60 * 1000
-    });
+    // const isProduction = process.env.NODE_ENV === "production" || process.env.RENDER === "true" || process.env.VERCEL;
+    // res.cookie("token", token, {
+    //   httpOnly: true,
+    //   secure: isProduction,
+    //   sameSite: isProduction ? "none" : "lax",
+    //   path: "/",
+    //   maxAge: 24 * 60 * 60 * 1000
+    // });
+
+    const {accessToken} = await issueAuthToken(user,res);
 
     return res.status(200).json({
       message: "Login successful (OTP)",
-      token,
+      token: accessToken,
+      accessToken,
       user: {
         id: user._id,
         username: user.username,
@@ -222,35 +244,34 @@ async function loginWithOtp(req, res) {
 const logoutUser = async (req, res) => {
   try {
     const authHeader = req.headers.authorization || req.headers.Authorization;
-    const token = (authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null) || req.cookies?.token;
-
-    if (token) {
+    const accessToken = (authHeader && authHeader.startsWith("Bearer ")?authHeader.slice(7):null) || req.cookies?.token;
+    const refreshToken = req.cookies?.refreshToken;
+    if(accessToken) {
       try {
-        const blackListToken = new BlackListToken({ token });
-        await blackListToken.save();
-      } catch (e) {
-        // ignore duplicate blacklist
+        await BlackListToken.updateOne(
+          {token : accessToken},
+          {$setOnInsert : {token: accessToken}},
+          {upsert: true}
+        );
+      }catch(error) {
+        console.error("Access token revocation error:",error);
       }
     }
-
-    const isProduction = process.env.NODE_ENV === "production" || process.env.RENDER === "true" || process.env.VERCEL;
-    res.clearCookie("token", {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? "none" : "lax",
-      path: "/"
+    if(refreshToken) {
+      await RefreshToken.updateOne(
+        {tokenHash:hashToken(refreshToken),revokedAt:null},
+        {$set: {revokedAt:new Date()}}
+      );
+    }
+    clearAuthCookies(res);
+    return res.status(200).json({
+      message : "User logged out successfully"
     });
-
-    return res.status(200).json({ 
-      message: "User logged out successfully" 
-    });
-  } catch (error) {
-    console.error("Logout Error:", error);
-
-    return res.status(500).json({ 
-      message: "Error logging out user", 
-      error: error.message 
-    });
+  } catch(error) {
+    console.error("Logout error:",error);
+    return res.status(500).json({
+      message : "Error logging out user"
+    })
   }
 };
 
@@ -274,8 +295,103 @@ async function getMe(req,res){
   });
 }
 
+async function refreshAccessToken(req,res) {
+  try {
+    const refreshToken = req.cookies?.refreshToken;
+    if(!refreshToken) {
+      clearAuthCookies(res);
+      return res.status(401).json({
+        message : "Refresh token missing. Please log in again."
+      });
+    }
+    let decoded;
+    try{
+      decoded = jwt.verify(
+        refreshToken,
+        process.env.REFRESH_TOKEN_SECRET
+      );
+    } catch {
+      clearAuthCookies(res);
+      return res.status(401).json({
+        message : "Refresh token expired or invalid. Please log in again"
+      });
+    }
+    if(decoded.type != "refresh" || !decoded.id) {
+      clearAuthCookies(res);
+      return res.status(401).json({
+        message : "Invalid refresh token."
+      });
+    }
+    const oldHash = hashToken(refreshToken);
+    const oldRecord = await RefreshToken.findOneAndUpdate(
+      {
+        userId : decoded.id,
+        tokenHash : oldHash,
+        revokedAt : null,
+        expiresAt : {$gt:new Date()}
+      },
+      {
+        $set : {revokedAt : new date()}
+      },
+      {new : false}
+    );
+    if(!oldRecord) {
+      await RefreshToken.updateMany(
+        {userId:decoded.id,revokedAt:null},
+        {$set : {revokedAt : new Date()}}
+      );
+      clearAuthCookies(res);
+      return res.status(401).json({
+        message : "Refresh token is invalid or has already been used. Please log in again"
+      });
+    }
+    const user = await User.findById(decoded.id);
+    if(!user) {
+      clearAuthCookies(res);
+      return res.status(401).json({
+        message : "User no longer exists"
+      });
+    }
+      const accessToken = createAccessToken(user);
+      const newRefreshToken = createRefreshToken(user);
+      const newHash = hashToken(newRefreshToken);
+      await RefreshToken.create({
+        userId: user._id,
+        tokenHash : newHash,
+        expiresAt : new Date(Date.now() + REFRESH_TOKEN_MS)
+      });
+      await RefreshToken.updateOne(
+        {_id : oldRecord._id},
+        {$set:{replacesByTokenHash:newHash}}
+      );
+      const cookieOptions = getCookieOptions();
+      res.cookie("token",accessToken,{
+        ...cookieOptions,
+        maxAge: 15*60*1000
+      });
+      res.cookie("refreshToken",newRefreshToken,{
+        ...cookieOptions,
+        maxAge: REFRESH_TOKEN_MS
+      });
+      return res.status(200).json({
+        message : "Access token refreshed successfully",
+        token: accessToken,
+        accessToken
+      });
+  } catch(error) {
+    console.error("Refresh token error: error");
+    return res.status(500).json({
+      message : "Unable to refresh token"
+    });
+  }
+}
+
 module.exports = {
   registerUser,
-  loginUser, logoutUser ,getMe, sendLoginOtp,
-  loginWithOtp
+  loginUser, 
+  logoutUser, 
+  getMe,
+  sendLoginOtp,
+  loginWithOtp,
+  refreshAccessToken
 };
